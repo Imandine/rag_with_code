@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+build/
+.vite/
+
+# Env
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# HuggingFace cache
+.cache/
+~/.cache/huggingface/
