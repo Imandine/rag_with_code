@@ -3,11 +3,13 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Send, Trash2, ChevronDown, ChevronRight, MessageSquare } from 'lucide-react'
 import { useChat, type ChatMessage, type ChatSource } from '../../hooks/useChat'
+import { useAuth } from '../../hooks/useAuth'
 
 export function ChatInterface() {
   const [input, setInput] = useState('')
   const [expandedSources, setExpandedSources] = useState<Record<number, boolean>>({})
   const { messages, sendQuery, loading, clearHistory } = useChat()
+  const { isAdmin } = useAuth()
   const scrollRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -83,6 +85,7 @@ export function ChatInterface() {
                   streaming={isStreaming(msg)}
                   expanded={!!expandedSources[i]}
                   onToggle={() => toggleSources(i)}
+                  showSources={isAdmin}
                 />
               ))}
             </div>
@@ -144,11 +147,13 @@ function MessageBubble({
   streaming,
   expanded,
   onToggle,
+  showSources,
 }: {
   msg: ChatMessage
   streaming: boolean
   expanded: boolean
   onToggle: () => void
+  showSources: boolean
 }) {
   const isUser = msg.role === 'user'
   return (
@@ -171,7 +176,7 @@ function MessageBubble({
         )}
       </div>
 
-      {!isUser && msg.sources && msg.sources.length > 0 && (
+      {!isUser && showSources && msg.sources && msg.sources.length > 0 && (
         <div className="mt-2 max-w-[85%] w-full">
           <button
             onClick={onToggle}

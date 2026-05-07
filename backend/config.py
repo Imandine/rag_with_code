@@ -36,7 +36,12 @@ class Settings(BaseSettings):
     minio_markdown_bucket: str = "markdown-documents"
 
     # Status store
-    status_db_path: str = "/app/data/status.json"
+    status_db_path: str = "/app/data/status.db"
+
+    # Auth — un jeton partagé donne accès au back-office (upload, suppression, retry).
+    # Si vide, l'authentification est désactivée (pratique en dev) et tous les endpoints
+    # admin sont ouverts. En prod, définir ADMIN_TOKEN dans le .env.
+    admin_token: str | None = None
 
     class Config:
         env_file = str(ROOT_ENV)

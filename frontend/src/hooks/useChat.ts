@@ -41,6 +41,11 @@ export function useChat() {
 
   const sendQuery = async (query: string) => {
     setLoading(true)
+    // L'historique envoyé au backend = les messages déjà finalisés (sans la question courante
+    // ni le placeholder assistant). On ne garde que role+content (les sources sont locales).
+    const historyForBackend = messages
+      .filter(m => m.content.trim().length > 0)
+      .map(m => ({ role: m.role, content: m.content }))
     setMessages(prev => [...prev, { role: 'user', content: query }])
     setMessages(prev => [...prev, { role: 'assistant', content: '', sources: [] }])
 
@@ -48,7 +53,7 @@ export function useChat() {
       const response = await fetch('/api/query/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query, history: historyForBackend }),
       })
 
       const reader = response.body!.getReader()

@@ -1,11 +1,16 @@
 from sentence_transformers import CrossEncoder
 
+# Cross-encoder multilingue entraîné sur mMARCO (14 langues dont fr, en, ar) — plus
+# pertinent que ms-marco-MiniLM-L-6-v2 (anglais uniquement) pour notre corpus en français.
+RERANKER_MODEL = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
+
 _reranker = None
+
 
 def get_reranker():
     global _reranker
     if _reranker is None:
-        _reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2", max_length=512)
+        _reranker = CrossEncoder(RERANKER_MODEL, max_length=512)
     return _reranker
 
 def rerank(
@@ -13,13 +18,14 @@ def rerank(
     candidates: list[dict],
     max_k: int = 8,
     min_k: int = 1,
-    score_drop: float = 3.0,
+    score_drop: float = 0.3,
 ) -> list[dict]:
     """
     Cross-encoder reranking : évalue chaque paire (query, chunk).
     Sélection dynamique : on garde les chunks dont le score est proche du meilleur
     (best - score_drop), bornée par [min_k, max_k]. Évite de forcer 5 sources
     quand 1 ou 2 suffisent — ou d'en couper quand plusieurs sont pertinentes.
+    Note : avec mMiniLMv2 les scores sont en [0,1] (sigmoid), d'où score_drop=0.3.
     """
     if not candidates:
         return []

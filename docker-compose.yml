@@ -7,6 +7,7 @@ services:
       - "6333:6333"
     volumes:
       - qdrant_data:/qdrant/storage
+    restart: unless-stopped
 
   minio:
     image: minio/minio:latest
@@ -14,11 +15,12 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      - MINIO_ROOT_USER=minioadmin
-      - MINIO_ROOT_PASSWORD=minioadmin
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
+    restart: unless-stopped
 
   backend:
     build: ./backend
@@ -27,31 +29,34 @@ services:
     env_file:
       - .env
     environment:
-      - QDRANT_URL=http://qdrant:6333
-      - HF_HOME=/models
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - STATUS_DB_PATH=/app/data/status.json
+      # Écrase les valeurs du .env pour pointer vers les services Docker internes
+      QDRANT_URL: http://qdrant:6333
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      STATUS_DB_PATH: /app/data/status.db
+      # Cache HuggingFace partagé entre redémarrages
+      HF_HOME: /models
+      # Désactive les warnings symlink HF sur certains FS
+      HF_HUB_DISABLE_SYMLINKS_WARNING: "1"
     depends_on:
       - qdrant
       - minio
     volumes:
-      - ./backend:/app
-      - ./.env:/app/.env:ro
-      - hf_models:/models
-      - backend_data:/app/data
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+      - backend_data:/app/data      # status.db + données persistantes
+      - hf_models:/models           # modèles HuggingFace/fastembed mis en cache
+    restart: unless-stopped
 
   frontend:
     build: ./frontend
     ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_URL=http://localhost:8000
+      - "3000:80"     # nginx dans le conteneur écoute sur 80
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
   qdrant_data:
-  hf_models:
   minio_data:
+  hf_models:
   backend_data:

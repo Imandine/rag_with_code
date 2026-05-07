@@ -127,6 +127,48 @@ export function PipelineDots({ status }: { status: DocumentStatus }) {
   )
 }
 
+export function PageProgress({
+  pagesDone,
+  totalPages,
+  ocrUsed,
+}: {
+  pagesDone: number
+  totalPages: number
+  ocrUsed?: boolean | null
+}) {
+  const safeTotal = Math.max(totalPages, 1)
+  const safeDone = Math.min(Math.max(pagesDone, 0), safeTotal)
+  const pct = Math.round((safeDone / safeTotal) * 100)
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex items-center justify-between text-[10px] text-slate-400">
+        <span className="text-slate-300">
+          Pages traitées :{' '}
+          <span className="text-primary-300 font-medium">
+            {safeDone}/{totalPages}
+          </span>
+          {ocrUsed ? (
+            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 text-[9px] font-medium border border-amber-500/30">
+              OCR
+            </span>
+          ) : null}
+        </span>
+        <span>{pct}%</span>
+      </div>
+      <div className="relative h-1 rounded-full bg-slate-700/80 overflow-hidden">
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-all duration-700"
+          style={{ width: `${pct}%` }}
+        />
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-emerald-400/50 blur-sm transition-all duration-700"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
 export function PipelineProgress({ status }: { status: DocumentStatus }) {
   const currentIndex = stageIndex(status)
   // +1 au numérateur pour que le premier statut affiche ~17% et non 0%

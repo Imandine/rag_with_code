@@ -1,11 +1,29 @@
 import { useState, useCallback } from 'react'
 import { useDropzone } from 'react-dropzone'
 import { UploadCloud, Loader2 } from 'lucide-react'
+import { getAuthHeaders } from '../../hooks/useAuth'
 
 const ACCEPTED_TYPES = {
   'application/pdf': ['.pdf'],
+  'application/msword': ['.doc'],
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
-  'text/html': ['.html'],
+  'application/vnd.oasis.opendocument.text': ['.odt'],
+  'application/rtf': ['.rtf'],
+  'application/vnd.ms-powerpoint': ['.ppt'],
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': ['.pptx'],
+  'application/vnd.oasis.opendocument.presentation': ['.odp'],
+  'application/vnd.ms-excel': ['.xls'],
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+  'application/vnd.oasis.opendocument.spreadsheet': ['.ods'],
+  'text/csv': ['.csv'],
+  'text/html': ['.html', '.htm'],
+  'text/plain': ['.txt', '.log'],
+  'text/markdown': ['.md', '.markdown'],
+  'image/png': ['.png'],
+  'image/jpeg': ['.jpg', '.jpeg'],
+  'image/tiff': ['.tif', '.tiff'],
+  'image/webp': ['.webp'],
+  'image/bmp': ['.bmp'],
 }
 
 interface PendingUpload {
@@ -28,6 +46,7 @@ export function DocumentUpload({ onUpload }: { onUpload: () => void }) {
           try {
             const res = await fetch('/api/documents/upload', {
               method: 'POST',
+              headers: getAuthHeaders(),
               body: formData,
             })
             setPending(prev =>
@@ -89,7 +108,7 @@ export function DocumentUpload({ onUpload }: { onUpload: () => void }) {
                 : 'Glissez vos documents ou cliquez pour parcourir'}
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              Formats supportés : PDF, DOCX, HTML — multiples fichiers acceptés
+              PDF, Word, PowerPoint, Excel, OpenDocument, HTML, Markdown, texte, images — multiples fichiers acceptés
             </p>
           </div>
         </div>

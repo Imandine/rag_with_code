@@ -21,7 +21,10 @@ build/
 .vscode/
 .idea/
 .DS_Store
+.claude/
 
 # HuggingFace cache
 .cache/
 ~/.cache/huggingface/
+backend/data/
+
