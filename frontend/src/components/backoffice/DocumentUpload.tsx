@@ -19,11 +19,6 @@ const ACCEPTED_TYPES = {
   'text/html': ['.html', '.htm'],
   'text/plain': ['.txt', '.log'],
   'text/markdown': ['.md', '.markdown'],
-  'image/png': ['.png'],
-  'image/jpeg': ['.jpg', '.jpeg'],
-  'image/tiff': ['.tif', '.tiff'],
-  'image/webp': ['.webp'],
-  'image/bmp': ['.bmp'],
 }
 
 interface PendingUpload {
@@ -108,7 +103,7 @@ export function DocumentUpload({ onUpload }: { onUpload: () => void }) {
                 : 'Glissez vos documents ou cliquez pour parcourir'}
             </p>
             <p className="text-xs text-slate-400 mt-1">
-              PDF, Word, PowerPoint, Excel, OpenDocument, HTML, Markdown, texte, images — multiples fichiers acceptés
+              PDF, Word, PowerPoint, Excel, OpenDocument, HTML, Markdown, texte — multiples fichiers acceptés
             </p>
           </div>
         </div>

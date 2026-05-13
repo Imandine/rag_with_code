@@ -274,16 +274,15 @@ function DocumentCard({
       </div>
 
       {!['done', 'error'].includes(doc.status) && (
-        <div className="flex flex-col gap-2">
+        typeof doc.num_pages === 'number' && doc.num_pages > 0 ? (
+          <PageProgress
+            pagesDone={doc.pages_done ?? 0}
+            totalPages={doc.num_pages}
+            ocrUsed={doc.ocr_used}
+          />
+        ) : (
           <PipelineProgress status={doc.status} />
-          {typeof doc.num_pages === 'number' && doc.num_pages > 0 && (
-            <PageProgress
-              pagesDone={doc.pages_done ?? 0}
-              totalPages={doc.num_pages}
-              ocrUsed={doc.ocr_used}
-            />
-          )}
-        </div>
+        )
       )}
 
       {doc.status === 'done' && typeof doc.chunks === 'number' && (

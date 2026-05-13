@@ -8,15 +8,24 @@ from pathlib import Path
 from typing import Iterator
 
 import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_c
 from docling.datamodel.accelerator_options import AcceleratorOptions
 from docling.datamodel.base_models import DocumentStream
-from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.datamodel.pipeline_options import (
+    PdfPipelineOptions,
+    TesseractOcrOptions,
+)
 from docling.document_converter import DocumentConverter, PdfFormatOption
 
 
 PDF_BATCH_PAGES = 10  # taille d'un sous-document PDF envoyé à Docling (réduit pour limiter la mémoire)
 
-# Formats convertibles en PDF par LibreOffice (rendu fidèle, puis pipeline PDF)
+# Langues OCR Tesseract — `fra` pour le corpus douanier français, `eng` pour les
+# documents bilingues fréquents (réglementations UEMOA/CEDEAO).
+OCR_LANGUAGES = ["fra", "eng"]
+
+# Formats que LibreOffice convertit en PDF (meilleure qualité).
+# Si LibreOffice est absent, certains peuvent être traités directement par Docling (voir ci-dessous).
 LIBREOFFICE_FORMATS = {
     ".doc", ".docx", ".odt", ".rtf",
     ".ppt", ".pptx", ".odp",
@@ -24,18 +33,36 @@ LIBREOFFICE_FORMATS = {
     ".html", ".htm",
 }
 
+# Parmi les LIBREOFFICE_FORMATS, ceux que Docling supporte nativement en fallback
+# (si LibreOffice est absent, on passe directement à Docling plutôt que d'échouer).
+DOCLING_NATIVE_FALLBACK = {".docx", ".pptx", ".xlsx", ".csv", ".html", ".htm"}
+
+# Formats qui nécessitent LibreOffice obligatoirement — Docling ne les reconnaît pas.
+# Si LibreOffice est absent, l'ingestion renvoie une erreur claire.
+LIBREOFFICE_REQUIRED = LIBREOFFICE_FORMATS - DOCLING_NATIVE_FALLBACK
+
 # Formats texte bruts traités directement, sans passer par Docling
 PLAIN_TEXT_FORMATS = {".txt", ".md", ".markdown", ".log"}
 
-# Formats laissés à Docling tels quels (images, PDF de secours, etc.)
-DOCLING_DIRECT_FORMATS = {
-    ".pdf",
-    ".png", ".jpg", ".jpeg", ".tiff", ".tif", ".bmp", ".webp",
-}
+# Formats laissés à Docling tels quels (PDF de secours, etc.)
+DOCLING_DIRECT_FORMATS = {".pdf"}
+
+
+def _page_has_text(page: pdfium.PdfPage) -> bool:
+    """True si la page contient du texte sélectionnable (donc pas besoin d'OCR)."""
+    text_page = page.get_textpage()
+    try:
+        return bool(text_page.get_text_range().strip())
+    finally:
+        text_page.close()
 
 
 def _has_text_layer(pdf: pdfium.PdfDocument, sample_size: int = 4) -> bool:
-    """Retourne True si le PDF embarque déjà du texte (donc pas besoin d'OCR)."""
+    """Retourne True si AU MOINS une page échantillon embarque du texte.
+
+    Sert seulement à décider du moteur OCR (do_ocr global). La granularité page-par-page
+    est gérée plus finement par `_strip_decorative_images` qui inspecte chaque page.
+    """
     n = len(pdf)
     if n == 0:
         return False
@@ -43,15 +70,82 @@ def _has_text_layer(pdf: pdfium.PdfDocument, sample_size: int = 4) -> bool:
     for idx in indices:
         page = pdf[idx]
         try:
-            text_page = page.get_textpage()
-            try:
-                if text_page.get_text_range().strip():
-                    return True
-            finally:
-                text_page.close()
+            if _page_has_text(page):
+                return True
         finally:
             page.close()
     return False
+
+
+def _strip_decorative_images(pdf: pdfium.PdfDocument) -> dict:
+    """Retire les images décoratives des pages qui ont déjà une couche texte.
+
+    Stratégie :
+    - Page avec texte sélectionnable → image = logo/diagramme décoratif → on la retire
+      (gain : pas d'OCR sur la page, moins de mémoire, pas de bruit OCR dans le markdown).
+    - Page sans texte (scannée) → l'image EST le contenu → on la garde intacte pour OCR.
+
+    Modifie le document en place. Retourne des stats {pages_stripped, images_removed,
+    pages_kept_for_ocr} utiles pour le statut affiché dans le back-office.
+    """
+    pages_stripped = 0
+    images_removed = 0
+    pages_kept_for_ocr = 0
+
+    for i in range(len(pdf)):
+        page = pdf[i]
+        try:
+            if not _page_has_text(page):
+                pages_kept_for_ocr += 1
+                continue
+
+            # Page avec couche texte : on retire ses images via l'API pypdfium2.raw
+            count = pdfium_c.FPDFPage_CountObjects(page.raw)
+            removed_on_page = 0
+            # Parcours à l'envers : remove invalide les indices supérieurs
+            for j in range(count - 1, -1, -1):
+                obj = pdfium_c.FPDFPage_GetObject(page.raw, j)
+                if pdfium_c.FPDFPageObj_GetType(obj) == pdfium_c.FPDF_PAGEOBJ_IMAGE:
+                    pdfium_c.FPDFPage_RemoveObject(page.raw, obj)
+                    removed_on_page += 1
+            if removed_on_page:
+                pdfium_c.FPDFPage_GenerateContent(page.raw)
+                pages_stripped += 1
+                images_removed += removed_on_page
+        finally:
+            page.close()
+
+    return {
+        "pages_stripped": pages_stripped,
+        "images_removed": images_removed,
+        "pages_kept_for_ocr": pages_kept_for_ocr,
+    }
+
+
+def _preprocess_pdf(pdf_path: str) -> str:
+    """Stripe les images décoratives et retourne le chemin d'un PDF nettoyé.
+
+    Si rien n'a été retiré (PDF entièrement scanné), retourne le chemin d'origine pour
+    éviter une copie inutile.
+    """
+    pdf = pdfium.PdfDocument(pdf_path)
+    try:
+        stats = _strip_decorative_images(pdf)
+        if stats["images_removed"] == 0:
+            return pdf_path
+        out_path = pdf_path + ".stripped.pdf"
+        pdf.save(out_path)
+        return out_path
+    finally:
+        pdf.close()
+
+
+def _is_tesseract_available() -> bool:
+    """Détecte si tesseract est installé (binaire dans le PATH ou défini par env)."""
+    env = os.environ.get("TESSERACT_BIN") or os.environ.get("TESSERACT_CMD")
+    if env and Path(env).exists():
+        return True
+    return shutil.which("tesseract") is not None
 
 
 def _build_converter(do_ocr: bool) -> DocumentConverter:
@@ -63,9 +157,19 @@ def _build_converter(do_ocr: bool) -> DocumentConverter:
     pipeline_options.layout_batch_size = 1
     pipeline_options.ocr_batch_size = 1
     pipeline_options.table_batch_size = 1
+    # Pas de rendu d'images dans l'output Docling (économise mémoire et I/O)
+    pipeline_options.generate_page_images = False
+    pipeline_options.generate_picture_images = False
     # Résolution réduite : limite la mémoire des images intermédiaires (OCR float64 = 8x la taille)
     pipeline_options.images_scale = 1.0
     pipeline_options.accelerator_options = AcceleratorOptions(num_threads=2, device="cpu")
+
+    # OCR : Tesseract avec français+anglais si disponible (qualité supérieure sur le
+    # corpus français accentué). Sinon on laisse Docling utiliser son moteur par défaut
+    # (RapidOCR) pour ne pas casser les environnements de dev sans tesseract installé.
+    if do_ocr and _is_tesseract_available():
+        pipeline_options.ocr_options = TesseractOcrOptions(lang=OCR_LANGUAGES)
+
     return DocumentConverter(
         format_options={"pdf": PdfFormatOption(pipeline_options=pipeline_options)}
     )
@@ -131,7 +235,13 @@ def _convert_to_pdf_via_libreoffice(file_path: str) -> str | None:
 
 
 def _iter_pdf_batches(file_path: str, batch_pages: int, source_format: str) -> Iterator[dict]:
-    pdf = pdfium.PdfDocument(file_path)
+    # 1) Prétraitement : on retire les images décoratives des pages avec couche texte.
+    #    Les pages 100% scannées sont préservées pour l'OCR. Renvoie un nouveau chemin
+    #    si un PDF nettoyé a été produit, sinon le chemin d'origine.
+    stripped_path = _preprocess_pdf(file_path)
+    used_stripped = stripped_path != file_path
+
+    pdf = pdfium.PdfDocument(stripped_path)
     total = len(pdf)
     do_ocr = not _has_text_layer(pdf)
 
@@ -176,6 +286,11 @@ def _iter_pdf_batches(file_path: str, batch_pages: int, source_format: str) -> I
             gc.collect()  # libère la RAM accumulée par les modèles Docling avant le lot suivant
     finally:
         pdf.close()
+        if used_stripped:
+            try:
+                os.unlink(stripped_path)
+            except OSError:
+                pass
 
 
 def _iter_plain_text(file_path: str) -> Iterator[dict]:
@@ -221,7 +336,7 @@ def iter_document_batches(file_path: str, batch_pages: int = PDF_BATCH_PAGES) ->
       - .pdf                          → split par tranches de pages, Docling sur chaque tranche
       - .docx/.pptx/.xlsx/.html/...   → conversion en PDF via LibreOffice puis pipeline PDF
       - .txt/.md/.csv                 → texte brut, pas de Docling
-      - images                        → Docling direct (OCR auto)
+      - autres (images, binaires)     → erreur explicite
     """
     suffix = Path(file_path).suffix.lower()
 
@@ -246,7 +361,16 @@ def iter_document_batches(file_path: str, batch_pages: int = PDF_BATCH_PAGES) ->
                 except OSError:
                     pass
             return
-        # LibreOffice indisponible → fallback Docling natif
+
+        # LibreOffice indisponible
+        if suffix in LIBREOFFICE_REQUIRED:
+            # Docling ne reconnaît pas ces formats (.doc, .odt, .rtf, .ppt, .xls, .ods…)
+            raise RuntimeError(
+                f"Le format '{suffix}' nécessite LibreOffice pour être converti. "
+                "Installez LibreOffice et assurez-vous que 'soffice' est dans le PATH "
+                "(puis définissez LIBREOFFICE_BIN dans le .env)."
+            )
+        # Formats que Docling gère nativement (.docx, .pptx, .xlsx, .html…)
         yield from _iter_docling_direct(file_path)
         return
 
@@ -254,5 +378,8 @@ def iter_document_batches(file_path: str, batch_pages: int = PDF_BATCH_PAGES) ->
         yield from _iter_docling_direct(file_path)
         return
 
-    # Format inconnu : on tente Docling, qui lèvera une erreur explicite si non géré
-    yield from _iter_docling_direct(file_path)
+    # Format non supporté (images, fichiers binaires, etc.)
+    raise RuntimeError(
+        f"Le format '{suffix}' n'est pas pris en charge. "
+        "Formats acceptés : PDF, Word, PowerPoint, Excel, OpenDocument, HTML, CSV, Markdown, texte."
+    )
